@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-email_client.py
+email_client_threadsafe.py
 
 功能：
 - 封装 163 邮箱轮询监听新邮件逻辑
 - 提供 EmailClient 类供主程序调用
+- 支持线程安全调用异步回调（如 LLM 提取验证码和发送消息）
 """
 
-import os
 import time
+import asyncio
 from typing import Callable
 from imapclient import IMAPClient
 from email import message_from_bytes
 from email.header import decode_header
-
 
 class EmailClient:
     def __init__(
@@ -23,6 +23,7 @@ class EmailClient:
         imap_host: str = "imap.163.com",
         mailbox: str = "INBOX",
         poll_interval: int = 10,
+        loop: asyncio.AbstractEventLoop = None,  # type: ignore
     ):
         """
         初始化 EmailClient
@@ -31,6 +32,7 @@ class EmailClient:
         :param imap_host: IMAP服务器
         :param mailbox: 监听文件夹，默认收件箱
         :param poll_interval: 轮询间隔（秒）
+        :param loop: 主事件循环，用于线程安全调度协程
         """
         self.email_addr = email_addr
         self.email_pass = email_pass
@@ -38,7 +40,8 @@ class EmailClient:
         self.mailbox = mailbox
         self.poll_interval = poll_interval
         self.seen_uids = set()
-        self.client = None  # IMAPClient 实例
+        self.client = None
+        self.loop = loop or asyncio.get_event_loop()  # 主事件循环
 
     @staticmethod
     def decode_str(s: str) -> str:
@@ -89,11 +92,13 @@ class EmailClient:
         """
         开始监听邮箱新邮件
         :param callback: 新邮件处理回调函数，参数 (uid, email_info_dict)
+                         支持异步协程函数，线程安全调度
         """
         if not self.client:
             self.connect()
 
         print(f"[EmailClient] 开始监听 {self.mailbox} ...")
+
         while True:
             try:
                 if self.client:
@@ -103,27 +108,19 @@ class EmailClient:
                         msg_data = self.client.fetch(uid, ["RFC822"])
                         raw_email = msg_data[uid][b"RFC822"]
                         email_info = self.parse_email(raw_email)  # type: ignore
-                        callback(uid, email_info)
+
+                        # 判断 callback 是否为协程函数
+                        if asyncio.iscoroutinefunction(callback):
+                            asyncio.run_coroutine_threadsafe(
+                                callback(uid, email_info), self.loop
+                            )
+                        else:
+                            # 普通同步回调
+                            callback(uid, email_info)
+
                         self.seen_uids.add(uid)
+
             except Exception as e:
                 print("[EmailClient] 监听异常：", e)
 
             time.sleep(self.poll_interval)
-
-
-if __name__ == "__main__":
-    # 测试
-    EMAIL_ADDR = os.environ.get("EMAIL_ADDR", "ljc2481534548@163.com")
-    EMAIL_PASS = os.environ.get("EMAIL_PASS", "YVcCGMeZTWKRatcq")
-
-    def print_email(uid, email_info):
-        print("---------- 新邮件 ----------")
-        print("UID:", uid)
-        print("From:", email_info["from"])
-        print("Date:", email_info["date"])
-        print("Subject:", email_info["subject"])
-        print("Body:\n", email_info["body"])
-        print("----------------------------\n")
-
-    client = EmailClient(EMAIL_ADDR, EMAIL_PASS)
-    client.start_listening(print_email)
