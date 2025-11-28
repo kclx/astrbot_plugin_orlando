@@ -1,9 +1,13 @@
 import asyncio
 import threading
+from turtle import st
+
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api import AstrBotConfig
+from astrbot.api.event import filter
 from astrbot.core.message.message_event_result import MessageEventResult
+from astrbot.core.platform.astr_message_event import AstrMessageEvent
 
 from .engine.emailCli import EmailClient
 
@@ -109,3 +113,38 @@ class OrlandoPlugin(Star):
     async def terminate(self):
         """插件被卸载时执行"""
         logger.info("OrlandoPlugin 已终止。")
+
+    # =====================================================================
+    # ★★★ 点赞功能 ★★★
+    # =====================================================================
+    @filter.command("给我点赞")
+    async def send_like(self, event: AstrMessageEvent):
+        if event.get_platform_name() == "aiocqhttp":
+            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+                AiocqhttpMessageEvent,
+            )
+
+            assert isinstance(event, AiocqhttpMessageEvent)
+            client = event.bot
+            payloads = {"user_id": event.get_sender_id(), "times": 5}
+            await client.api.call_action("send_like", **payloads)
+            yield event.plain_result("点啦")
+            event.stop_event()
+
+    @filter.llm_tool(name="good")
+    async def good(self, event: AstrMessageEvent, times: int) -> MessageEventResult:  # type: ignore
+        """给用户点赞
+
+        Args:
+            times(int): 点赞次数
+        """
+        if event.get_platform_name() == "aiocqhttp":
+            from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+                AiocqhttpMessageEvent,
+            )
+            assert isinstance(event, AiocqhttpMessageEvent)
+            client = event.bot
+            payloads = {"user_id": event.get_sender_id(), "times": times}
+            await client.api.call_action("send_like", **payloads)
+            return "点赞成功"  # type: ignore
+
