@@ -1,0 +1,14 @@
+{
+  "email_addr": {
+    "description": "email account",
+    "type": "string"
+  },
+  "email_pass": {
+    "description": "email authentication code or password",
+    "type": "string"
+  },
+  "id": {
+    "description": "qq session id to push email notifications to",
+    "type": "string"
+  }
+}
